@@ -45,6 +45,7 @@ import time
 import threading
 import os
 import glob
+import argparse
 from pathlib import Path
 from flask import Flask, Response, jsonify, request
 
@@ -52,11 +53,18 @@ from flask import Flask, Response, jsonify, request
 # Configuration
 # ---------------------------------------------------------------------------
 
-WIDTH    = 256
-HEIGHT   = 386        # full dual-frame: 192 image + 2 info + 192 temp
-IR_ROWS  = 192        # rows of actual thermal image
-SCALE    = 3          # render at 3x: 256x192 -> 768x576
-PORT     = 5800
+WIDTH   = 256
+HEIGHT  = 386        # full dual-frame: 192 image + 2 info + 192 temp
+IR_ROWS = 192        # rows of actual thermal image
+SCALE   = 3          # render at 3x: 256x192 -> 768x576
+
+# Port precedence (highest to lowest):
+#   1. --port CLI argument
+#   2. PORT environment variable  (useful for Docker: -e PORT=9000)
+#   3. Default: 7700
+# Resolved at startup in the __main__ block; stored here so Flask routes
+# that print the URL can reference it after argument parsing.
+PORT = int(os.environ.get('PORT', 7700))
 
 # SAVE_DIR: where snapshots and recordings are written.
 # Override with SAVE_DIR env var for container deployments (mount a volume there).
@@ -912,6 +920,12 @@ def api_save():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Thermal Master P2 live server')
+    parser.add_argument('--port', type=int, default=PORT,
+                        help=f'Port to listen on (default: {PORT}, overrides PORT env var)')
+    args = parser.parse_args()
+    PORT = args.port
+
     print(f'Starting capture thread...')
     t = threading.Thread(target=capture_loop, daemon=True)
     t.start()

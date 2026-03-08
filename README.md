@@ -43,7 +43,7 @@ The values in rows 194-385 are NUC-corrected by the camera firmware before strea
 
 | File | Description |
 |------|-------------|
-| `thermal_server.py` | Main application. Flask + MJPEG live server, port 5800. |
+| `thermal_server.py` | Main application. Flask + MJPEG live server, port 7700. |
 | `extract_temp.py` | Single-shot capture. Saves `temp_overlay.png` and `temp_gray.png`. |
 | `probe_386.py` | Frame layout discovery tool. Used during initial reverse engineering. |
 | `thermal_live.py` | OpenCV window live display. Superseded by Flask server; kept for reference. |
@@ -60,10 +60,12 @@ The values in rows 194-385 are NUC-corrected by the camera firmware before strea
 cd ThermalCamera
 uv venv
 uv pip install -r requirements.txt
-uv run python3 thermal_server.py
+uv run python3 thermal_server.py           # default port 7700
+uv run python3 thermal_server.py --port 9000   # custom port
+PORT=9000 uv run python3 thermal_server.py     # via env var
 ```
 
-Open `http://localhost:5800` in a browser.
+Open `http://localhost:7700` in a browser.
 
 ---
 
@@ -89,10 +91,11 @@ ls -la /dev/thermal_cam
 **Step 2: Build and run**
 
 ```bash
-docker compose up --build
+docker compose up --build                  # default port 7700
+PORT=9000 docker compose up --build       # custom port
 ```
 
-Open `http://localhost:5800` in a browser.
+Open `http://localhost:7700` in a browser.
 
 Snapshots and recordings are saved to `./recordings/` on the host.
 
@@ -132,6 +135,7 @@ Annotations on the live image:
 |----------|---------|-------------|
 | `THERMAL_DEVICE` | (auto-detect) | Camera device path. Set to skip VID:PID sysfs scan. |
 | `SAVE_DIR` | Script directory | Where snapshots and recordings are written. |
+| `PORT` | 7700 | Port to listen on. Overridden by `--port` flag if both are set. |
 
 These apply to both bare-metal and container deployments.
 
