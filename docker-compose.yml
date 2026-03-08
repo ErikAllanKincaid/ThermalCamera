@@ -1,0 +1,19 @@
+services:
+  thermal:
+    build: .
+    devices:
+      # /dev/thermal_cam is created by the udev rule (99-thermal-cam.rules).
+      # This symlink is stable across replugs and reboots -- the video node
+      # number (/dev/video0, /dev/video2, etc.) changes; the symlink does not.
+      # Install the udev rule on the host first (see 99-thermal-cam.rules).
+      - /dev/thermal_cam:/dev/thermal_cam
+    ports:
+      - "5800:5800"
+    volumes:
+      # Snapshots and recordings are written to ./recordings on the host.
+      # The container sees this as /data (SAVE_DIR env var).
+      - ./recordings:/data
+    environment:
+      - THERMAL_DEVICE=/dev/thermal_cam
+      - SAVE_DIR=/data
+    restart: unless-stopped

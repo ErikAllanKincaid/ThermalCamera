@@ -28,3 +28,7 @@ session_log.md
 extract_temp_INCORRECT*.py
 extract_temp_NOT-RAWPACKETS*.py
 extract_temp_yuyv422.py
+
+# Container recordings volume -- track the dir, not its contents
+recordings/*
+!recordings/.gitkeep

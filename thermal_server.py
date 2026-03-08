@@ -58,9 +58,10 @@ IR_ROWS  = 192        # rows of actual thermal image
 SCALE    = 3          # render at 3x: 256x192 -> 768x576
 PORT     = 5800
 
-# SAVE_DIR: resolve to the directory containing this script.
-# Path(__file__).parent works on any machine regardless of where the script lives.
-SAVE_DIR = str(Path(__file__).parent)
+# SAVE_DIR: where snapshots and recordings are written.
+# Override with SAVE_DIR env var for container deployments (mount a volume there).
+# Defaults to the script directory for bare-metal use.
+SAVE_DIR = os.environ.get('SAVE_DIR', str(Path(__file__).parent))
 
 # ---------------------------------------------------------------------------
 # Camera auto-detection
@@ -95,7 +96,11 @@ def find_camera(vid='3474', pid='4281', fallback='/dev/video0'):
     return fallback
 
 
-DEVICE = find_camera()
+# THERMAL_DEVICE: override camera device path via environment variable.
+# In a container, sysfs scanning via find_camera() is unreliable because
+# /sys/class/video4linux entries may not reflect the host's udev symlinks.
+# Set THERMAL_DEVICE=/dev/thermal_cam (or /dev/video0) to skip the scan.
+DEVICE = os.environ.get('THERMAL_DEVICE') or find_camera()
 
 # ---------------------------------------------------------------------------
 # False-color palettes
