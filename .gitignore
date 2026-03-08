@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Captures and output images
+*.png
+*.npy
+*.yuv
+snapshot_*.png
+snapshot_*.npy
+record_*.mp4
+record_*.avi
+
+# Large binary files (APK, EXE, PDF)
+*.apk
+*.exe
+*.pdf
+
+# APK decompiled output (large, reproducible)
+apk_decompiled/
+
+# Session log (ephemeral)
+session_log.md
+
+# Old/incorrect scripts kept for reference -- exclude from tracked code
+extract_temp_INCORRECT*.py
+extract_temp_NOT-RAWPACKETS*.py
+extract_temp_yuyv422.py
