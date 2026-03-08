@@ -60,11 +60,11 @@ SCALE   = 3          # render at 3x: 256x192 -> 768x576
 
 # Port precedence (highest to lowest):
 #   1. --port CLI argument
-#   2. PORT environment variable  (useful for Docker: -e PORT=9000)
+#   2. THERMAL_PORT environment variable  (useful for Docker: -e THERMAL_PORT=9000)
 #   3. Default: 7700
 # Resolved at startup in the __main__ block; stored here so Flask routes
 # that print the URL can reference it after argument parsing.
-PORT = int(os.environ.get('PORT', 7700))
+THERMAL_PORT = int(os.environ.get('THERMAL_PORT', 7700))
 
 # SAVE_DIR: where snapshots and recordings are written.
 # Override with SAVE_DIR env var for container deployments (mount a volume there).
@@ -921,10 +921,10 @@ def api_save():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Thermal Master P2 live server')
-    parser.add_argument('--port', type=int, default=PORT,
-                        help=f'Port to listen on (default: {PORT}, overrides PORT env var)')
+    parser.add_argument('--port', type=int, default=THERMAL_PORT,
+                        help=f'Port to listen on (default: {THERMAL_PORT}, overrides THERMAL_PORT env var)')
     args = parser.parse_args()
-    PORT = args.port
+    THERMAL_PORT = args.port
 
     print(f'Starting capture thread...')
     t = threading.Thread(target=capture_loop, daemon=True)
@@ -936,11 +936,11 @@ if __name__ == '__main__':
 
     print(f'Thermal server running.')
     print(f'Open in browser:')
-    print(f'  Local:   http://localhost:{PORT}')
-    print(f'  Network: http://{os.uname().nodename}:{PORT}')
+    print(f'  Local:   http://localhost:{THERMAL_PORT}')
+    print(f'  Network: http://{os.uname().nodename}:{THERMAL_PORT}')
     print(f'Press Ctrl+C to stop.')
 
     # threaded=True: Flask handles each request in its own thread.
     # This is important because generate_mjpeg() is a slow streaming generator
     # and would block all other requests if Flask ran single-threaded.
-    app.run(host='0.0.0.0', port=PORT, threaded=True)
+    app.run(host='0.0.0.0', port=THERMAL_PORT, threaded=True)

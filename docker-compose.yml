@@ -8,10 +8,10 @@ services:
       # Install the udev rule on the host first (see 99-thermal-cam.rules).
       - /dev/thermal_cam:/dev/thermal_cam
     ports:
-      # ${PORT:-7700}: use PORT env var on the host to change the port without
+      # ${THERMAL_PORT:-7700}: use THERMAL_PORT env var on the host to change the port without
       # editing this file. Both host and container port change together.
-      # Example: PORT=9000 docker compose up
-      - "${PORT:-7700}:${PORT:-7700}"
+      # Example: THERMAL_PORT=9000 docker compose up
+      - "${THERMAL_PORT:-7700}:${THERMAL_PORT:-7700}"
     volumes:
       # Snapshots and recordings are written to ./recordings on the host.
       # The container sees this as /data (SAVE_DIR env var).
@@ -19,5 +19,5 @@ services:
     environment:
       - THERMAL_DEVICE=/dev/thermal_cam
       - SAVE_DIR=/data
-      - PORT=${PORT:-7700}
+      - THERMAL_PORT=${THERMAL_PORT:-7700}
     restart: unless-stopped

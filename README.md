@@ -62,7 +62,7 @@ uv venv
 uv pip install -r requirements.txt
 uv run python3 thermal_server.py           # default port 7700
 uv run python3 thermal_server.py --port 9000   # custom port
-PORT=9000 uv run python3 thermal_server.py     # via env var
+THERMAL_PORT=9000 uv run python3 thermal_server.py     # via env var
 ```
 
 Open `http://localhost:7700` in a browser.
@@ -92,7 +92,7 @@ ls -la /dev/thermal_cam
 
 ```bash
 docker compose up --build                  # default port 7700
-PORT=9000 docker compose up --build       # custom port
+THERMAL_PORT=9000 docker compose up --build       # custom port
 ```
 
 Open `http://localhost:7700` in a browser.
@@ -135,7 +135,7 @@ Annotations on the live image:
 |----------|---------|-------------|
 | `THERMAL_DEVICE` | (auto-detect) | Camera device path. Set to skip VID:PID sysfs scan. |
 | `SAVE_DIR` | Script directory | Where snapshots and recordings are written. |
-| `PORT` | 7700 | Port to listen on. Overridden by `--port` flag if both are set. |
+| `THERMAL_PORT` | 7700 | Port to listen on. Overridden by `--port` flag if both are set. |
 
 These apply to both bare-metal and container deployments.
 

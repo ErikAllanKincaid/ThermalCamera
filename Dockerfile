@@ -28,10 +28,10 @@ EXPOSE 7700
 #   If unset, find_camera() will attempt sysfs scanning (may not work in containers).
 # SAVE_DIR: directory for snapshots and recordings.
 #   Mount a host directory here so files persist after container restart.
-# PORT: port the server listens on inside the container (default 7700).
+# THERMAL_PORT: port the server listens on inside the container (default 7700).
 #   Change via docker-compose ports + this env var together if you need a different port.
 ENV THERMAL_DEVICE=/dev/thermal_cam \
     SAVE_DIR=/data \
-    PORT=7700
+    THERMAL_PORT=7700
 
 CMD ["python3", "thermal_server.py"]
