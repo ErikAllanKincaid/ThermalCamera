@@ -14,4 +14,8 @@
 # MODE="0666" makes the device readable by all users (including the Docker
 # daemon process) without needing to add users to the 'video' group.
 
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3474", ATTRS{idProduct}=="4281", SYMLINK+="thermal_cam", MODE="0666"
+# ATTR{index}=="0" selects the video capture interface (index 0).
+# The camera also exposes a metadata interface at index 1 (/dev/video5 etc).
+# Without this filter the symlink lands on whichever interface udev processes
+# last, which is non-deterministic and was pointing to the metadata node.
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3474", ATTRS{idProduct}=="4281", ATTR{index}=="0", SYMLINK+="thermal_cam", MODE="0666"
