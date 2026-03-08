@@ -130,7 +130,9 @@ state = {
     'palette':   0,            # index into PALETTES list
     'unit':      'C',          # display unit: 'C' or 'F' -- conversion happens at output boundary
     'running':   True,         # set to False to stop the capture thread
-    'frame_seq': 0,            # increments on every good frame; client uses this to detect stale frames
+    'frame_seq':   0,          # increments on every good frame; client uses this to detect stale frames
+    'recording':   False,      # True while capture thread is writing a video file
+    'record_file': None,       # basename of the current .mp4 file, or None
 }
 
 
@@ -230,7 +232,9 @@ def render_jpeg(temp_c, palette_idx, unit):
     # [1] gets the byte array; .tobytes() converts to Python bytes.
     # Quality 85: imperceptible loss at ~5-10x smaller than quality 100.
     ok, buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    return buf.tobytes() if ok else None
+    # Return both JPEG bytes (for streaming) and the BGR frame (for video recording).
+    # The caller decides whether to write to a VideoWriter; render_jpeg stays pure.
+    return (buf.tobytes() if ok else None), display
 
 
 # ---------------------------------------------------------------------------
@@ -274,13 +278,16 @@ def capture_loop():
     Thread safety:
       Writes to state['jpeg'], state['temp_c'], state['stats'] under the lock.
       Flask threads only READ these values under the same lock.
+      video_writer is exclusively owned by this thread -- Flask threads never
+      touch it; they only set state['recording'] as a signal.
     """
     print(f'Capture thread started. Device: {DEVICE}')
 
-    fps_count      = 0
-    fps_timer      = time.time()
-    fps            = 0.0
+    fps_count       = 0
+    fps_timer       = time.time()
+    fps             = 0.0
     BAD_FRAME_LIMIT = 8   # consecutive bad frames before reconnect
+    video_writer    = None  # cv2.VideoWriter, owned by this thread
 
     while state['running']:
         container = None
@@ -351,7 +358,7 @@ def capture_loop():
                     palette_idx = state['palette']
                     unit        = state['unit']
 
-                jpeg = render_jpeg(temp_c, palette_idx, unit)
+                jpeg, display_bgr = render_jpeg(temp_c, palette_idx, unit)
 
                 # FPS tracking
                 fps_count += 1
@@ -371,6 +378,33 @@ def capture_loop():
                         'mean': round(float(temp_c.mean()), 1),
                         'fps':  round(fps, 1),
                     }
+                    should_record = state['recording']
+
+                # --- Video recording ---
+                # Open or close VideoWriter based on the recording flag.
+                # VideoWriter is owned entirely by this thread; Flask threads
+                # only flip state['recording'] as a signal.
+                if should_record and video_writer is None:
+                    ts       = time.strftime('%Y%m%d_%H%M%S')
+                    rec_path = os.path.join(SAVE_DIR, f'record_{ts}.mp4')
+                    fourcc   = cv2.VideoWriter_fourcc(*'mp4v')
+                    video_writer = cv2.VideoWriter(
+                        rec_path, fourcc, 25.0,
+                        (WIDTH * SCALE, IR_ROWS * SCALE)
+                    )
+                    with state['lock']:
+                        state['record_file'] = f'record_{ts}.mp4'
+                    print(f'Recording started: {rec_path}')
+
+                elif not should_record and video_writer is not None:
+                    video_writer.release()
+                    video_writer = None
+                    with state['lock']:
+                        state['record_file'] = None
+                    print('Recording stopped.')
+
+                if video_writer is not None and display_bgr is not None:
+                    video_writer.write(display_bgr)
 
         except Exception as e:
             print(f'Capture error: {e}')
@@ -381,6 +415,17 @@ def capture_loop():
                 except Exception:
                     pass
                 print('Camera container closed.')
+            # Release VideoWriter on disconnect. Recording stops here; the
+            # user must press Record again after the camera reconnects.
+            # This avoids a gap in the middle of an MP4 (partial writes
+            # produce unreadable files with most codecs).
+            if video_writer is not None:
+                video_writer.release()
+                video_writer = None
+                with state['lock']:
+                    state['recording']   = False
+                    state['record_file'] = None
+                print('Recording auto-stopped (camera disconnected).')
 
         if state['running']:
             print('Reconnecting in 2s...')
@@ -419,8 +464,11 @@ HTML = """<!DOCTYPE html>
       background:#222; color:#ccc; border:1px solid #444;
       padding:6px 16px; cursor:pointer; font-family:monospace; margin-right:6px;
     }
-    button:hover { background:#333; }
+    button:hover        { background:#333; }
+    button.recording    { background:#600; color:#f88; border-color:#a00; }
+    button.recording:hover { background:#700; }
     #stats      { margin-top:8px; font-size:0.82em; color:#888; }
+    #rec_status { color:#f44; font-weight:bold; }
     #msg        { font-size:0.8em; color:#555; margin-top:4px; min-height:1em; }
   </style>
 </head>
@@ -434,6 +482,7 @@ HTML = """<!DOCTYPE html>
     <button onclick="cyclePalette()" title="keyboard: p">Palette [p]</button>
     <button onclick="toggleUnit()"  title="keyboard: u" id="unitBtn">C / F [u]</button>
     <button onclick="saveSnapshot()" title="keyboard: s">Save [s]</button>
+    <button onclick="toggleRecord()" title="keyboard: r" id="recBtn">Record [r]</button>
   </div>
   <div id="stats">connecting...</div>
   <div id="msg"></div>
@@ -588,20 +637,44 @@ HTML = """<!DOCTYPE html>
         .catch(() => { msgDiv.textContent = 'Save failed.'; });
     }
 
+    // --- Record toggle ---
+    function toggleRecord() {
+      fetch('/api/record', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => { applyRecordState(d.recording, d.file); })
+        .catch(() => {});
+    }
+
+    function applyRecordState(recording, recFile) {
+      const btn = document.getElementById('recBtn');
+      if (recording) {
+        btn.textContent = '\u25cf REC [r]';
+        btn.classList.add('recording');
+        msgDiv.textContent = 'Recording: ' + (recFile || '...');
+      } else {
+        btn.textContent = 'Record [r]';
+        btn.classList.remove('recording');
+        if (recFile === null) msgDiv.textContent = 'Recording stopped.';
+      }
+    }
+
     // --- Stats bar (polls /api/stats every second) ---
     // Using polling (setInterval) rather than WebSocket keeps the server simple.
     // At 1 Hz this has negligible overhead.
+    // Also syncs the Record button state so it reflects auto-stop on disconnect.
     function updateStats() {
       fetch('/api/stats')
         .then(r => r.json())
         .then(d => {
-          // d.unit is included in the stats response so the label always matches
           const u = '\u00b0' + d.unit;
-          statsDiv.textContent =
-            'Min: ' + d.min + u + '   ' +
-            'Max: ' + d.max + u + '   ' +
-            'Mean: ' + d.mean + u + '   ' +
-            'FPS: ' + d.fps;
+          let text = 'Min: ' + d.min + u + '   Max: ' + d.max + u +
+                     '   Mean: ' + d.mean + u + '   FPS: ' + d.fps;
+          if (d.recording && d.rec_file) {
+            text += '   \u25cf REC ' + d.rec_file;
+          }
+          statsDiv.textContent = text;
+          // Keep button in sync (handles auto-stop on camera disconnect)
+          applyRecordState(d.recording, d.rec_file);
         })
         .catch(() => { statsDiv.textContent = 'stats unavailable'; });
     }
@@ -613,6 +686,7 @@ HTML = """<!DOCTYPE html>
       if (e.key === 'p') cyclePalette();
       if (e.key === 'u') toggleUnit();
       if (e.key === 's') saveSnapshot();
+      if (e.key === 'r') toggleRecord();
     });
   </script>
 </body>
@@ -734,22 +808,47 @@ def temp_at():
     return jsonify({'temp': round(c_to_unit(float(temp_c[sy, sx]), unit), 1), 'unit': unit})
 
 
+@app.route('/api/record', methods=['POST'])
+def api_record():
+    """
+    Toggle video recording on/off.
+
+    Start: capture thread opens a new MP4 file (record_YYYYMMDD_HHMMSS.mp4)
+           and writes every rendered frame to it at 25fps.
+    Stop:  capture thread releases the VideoWriter and finalizes the file.
+
+    The VideoWriter is owned exclusively by the capture thread. This endpoint
+    only flips state['recording']; the capture thread reacts on its next frame.
+    Returns the new recording state and filename (or null if stopped).
+    """
+    with state['lock']:
+        state['recording'] = not state['recording']
+        rec      = state['recording']
+        rec_file = state['record_file']
+    return jsonify({'recording': rec, 'file': rec_file})
+
+
 @app.route('/api/stats')
 def api_stats():
     """
     Return min / max / mean / fps as JSON, converted to the current display unit.
     Stats are stored internally in Celsius; conversion happens here at the output boundary.
     The 'unit' field in the response tells the browser which symbol to display.
+    Includes recording state so the UI can show/hide the REC indicator.
     """
     with state['lock']:
-        s    = state['stats']
-        unit = state['unit']
+        s        = state['stats']
+        unit     = state['unit']
+        rec      = state['recording']
+        rec_file = state['record_file']
     return jsonify({
-        'min':  round(c_to_unit(s['min'],  unit), 1),
-        'max':  round(c_to_unit(s['max'],  unit), 1),
-        'mean': round(c_to_unit(s['mean'], unit), 1),
-        'fps':  s['fps'],
-        'unit': unit,
+        'min':       round(c_to_unit(s['min'],  unit), 1),
+        'max':       round(c_to_unit(s['max'],  unit), 1),
+        'mean':      round(c_to_unit(s['mean'], unit), 1),
+        'fps':       s['fps'],
+        'unit':      unit,
+        'recording': rec,
+        'rec_file':  rec_file,
     })
 
 
