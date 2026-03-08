@@ -2,11 +2,11 @@ services:
   thermal:
     build: .
     devices:
-      # /dev/thermal_cam is created by the udev rule (99-thermal-cam.rules).
-      # This symlink is stable across replugs and reboots -- the video node
-      # number (/dev/video0, /dev/video2, etc.) changes; the symlink does not.
-      # Install the udev rule on the host first (see 99-thermal-cam.rules).
-      - /dev/thermal_cam:/dev/thermal_cam
+      # Docker does not follow udev symlinks when creating device cgroups.
+      # Use ./start.sh instead of `docker compose up` directly -- it resolves
+      # /dev/thermal_cam to the real /dev/videoN path and sets THERMAL_DEVICE_HOST.
+      # Fallback: set THERMAL_DEVICE_HOST manually before running docker compose.
+      - "${THERMAL_DEVICE_HOST:-/dev/thermal_cam}:/dev/thermal_cam"
     ports:
       # ${THERMAL_PORT:-7700}: use THERMAL_PORT env var on the host to change the port without
       # editing this file. Both host and container port change together.

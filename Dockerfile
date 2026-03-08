@@ -1,12 +1,26 @@
-FROM python:3.12-slim
+FROM ubuntu:24.04
 
+# Ubuntu 24.04 (Noble) ships ffmpeg 6.1.1, matching the host.
+# Debian Bookworm (python:3.12-slim default) ships ffmpeg 7.x which has a
+# breaking change in its V4L2 demuxer: VIDIOC_G_INPUT failure (ENOTTY) is
+# now treated as fatal. The Raysentek/InfiRay P2 camera does not support
+# VIDIOC_G_INPUT; ffmpeg 6.x silently warns and continues, 7.x aborts.
+#
 # ffmpeg:         required by PyAV for V4L2 YUYV demux
 # libgl1:         required by opencv-python-headless (libGL.so.1)
 # libglib2.0-0:   required by opencv-python-headless (libgthread)
+# python3.12:     from ubuntu noble default repos
+# python3-pip:    for installing uv
+
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libgl1 \
         libglib2.0-0 \
+        python3.12 \
+        python3.12-venv \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,7 +31,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Install dependencies in a separate layer so rebuilds after code changes are fast.
 # opencv-python-headless: no X11/Qt dependencies -- correct for a headless server.
 COPY requirements.txt .
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN uv venv /app/.venv --python python3.12 \
+    && uv pip install --python /app/.venv/bin/python --no-cache -r requirements.txt
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY thermal_server.py .
 
@@ -34,4 +51,4 @@ ENV THERMAL_DEVICE=/dev/thermal_cam \
     SAVE_DIR=/data \
     THERMAL_PORT=7700
 
-CMD ["python3", "thermal_server.py"]
+CMD ["/app/.venv/bin/python3", "thermal_server.py"]
