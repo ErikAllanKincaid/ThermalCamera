@@ -43,14 +43,15 @@ The values in rows 194-385 are NUC-corrected by the camera firmware before strea
 
 | File | Description |
 |------|-------------|
-| `thermal_server.py` | Main application. Flask + MJPEG live server, port 7700. |
+| `thermal_server.py` | Main application. Flask live server, port 7700. |
 | `extract_temp.py` | Single-shot capture. Saves `temp_overlay.png` and `temp_gray.png`. |
 | `probe_386.py` | Frame layout discovery tool. Used during initial reverse engineering. |
 | `thermal_live.py` | OpenCV window live display. Superseded by Flask server; kept for reference. |
-| `Dockerfile` | Container build. `python:3.12-slim` + uv + opencv-python-headless. |
+| `Dockerfile` | Container build. Ubuntu 24.04 + uv + opencv-python-headless + ffmpeg 6.x. |
 | `docker-compose.yml` | Compose config. Device passthrough, recordings volume, auto-restart. |
+| `start.sh` | Wrapper for `docker compose` that resolves the udev symlink before passing the device to Docker. Use this instead of `docker compose` directly. |
 | `99-thermal-cam.rules` | Udev rule. Creates `/dev/thermal_cam` stable symlink by VID:PID. |
-| `requirements.txt` | Python dependencies for Docker build. |
+| `requirements.txt` | Python dependencies for Docker build and bare-metal use. |
 
 ---
 
@@ -73,40 +74,69 @@ Open `http://localhost:7700` in a browser.
 
 **Step 1: Install the udev rule (one-time, on the host)**
 
-The camera enumerates as `/dev/videoN` where N changes on every replug and reboot.
-The udev rule creates a stable `/dev/thermal_cam` symlink matched by USB VID:PID.
+The camera exposes two V4L2 interfaces: a video capture interface (index 0) and a metadata
+interface (index 1). Both share the same VID:PID. The udev rule uses `ATTR{index}=="0"` to
+select only the capture interface, creating a stable `/dev/thermal_cam` symlink.
+
+Without this filter, the symlink can land on the metadata node, which rejects all capture
+ioctls with `ENOTTY (Inappropriate ioctl for device)`.
 
 ```bash
 sudo cp 99-thermal-cam.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo udevadm trigger
 ```
 
-Verify (camera must be plugged in):
+Unplug and replug the camera, then verify:
 
 ```bash
 ls -la /dev/thermal_cam
+# should show -> videoN (the capture node, not the metadata node)
+v4l2-ctl -d /dev/thermal_cam --info | grep 'Video Capture'
+# should show "Video Capture" under Device Caps
 ```
 
 **Step 2: Build and run**
 
+Use `start.sh` instead of `docker compose` directly. Docker does not follow udev symlinks
+when creating device cgroups -- it sees the symlink as a plain file rather than a char device,
+which causes the passthrough to fail. `start.sh` resolves `/dev/thermal_cam` to the real
+`/dev/videoN` path before handing it to Docker.
+
 ```bash
-docker compose up --build                  # default port 7700
-THERMAL_PORT=9000 docker compose up --build       # custom port
+./start.sh up --build          # build image and start (first run)
+./start.sh up -d               # start detached (subsequent runs)
+./start.sh down                # stop
+THERMAL_PORT=9000 ./start.sh up -d    # custom port
 ```
 
-Open `http://localhost:7700` in a browser.
+Open `http://localhost:7700` (or the host IP/hostname from another machine on the network).
 
 Snapshots and recordings are saved to `./recordings/` on the host.
 
-**Without the udev rule (manual device)**
+**Base image note**
 
-If you skip the udev rule, find the device node and pass it explicitly:
+The Dockerfile uses `ubuntu:24.04` (ffmpeg 6.1.1). Debian Bookworm (`python:3.12-slim`)
+ships ffmpeg 7.x, which has a breaking change in its V4L2 demuxer: `VIDIOC_G_INPUT` failure
+is treated as fatal. This camera does not implement `VIDIOC_G_INPUT`. Ffmpeg 6.x ignores the
+failure and continues; 7.x aborts. Ubuntu 24.04 avoids this.
+
+PyAV ships its own bundled ffmpeg in its PyPI wheel (currently 8.x), which also has this
+behavior, so the system ffmpeg version matters for the ffmpeg binary path but not for PyAV
+itself. Both will fail on Debian Bookworm due to the cgroup issue being a separate layer.
+
+**Without the udev rule**
+
+If you skip the udev rule, find the capture node manually and pass it explicitly:
 
 ```bash
-lsusb | grep 3474        # find bus/device
-ls /dev/video*           # identify node
-THERMAL_DEVICE=/dev/video0 docker compose up --build
+# Find the capture node: look for the node where "Video Capture" appears under Device Caps
+for n in /dev/video*; do
+    if v4l2-ctl -d $n --info 2>/dev/null | grep -q 'Video Capture'; then
+        echo "$n"
+    fi
+done
+
+THERMAL_DEVICE_HOST=/dev/video4 ./start.sh up -d
 ```
 
 ---
@@ -133,11 +163,10 @@ Annotations on the live image:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `THERMAL_DEVICE` | (auto-detect) | Camera device path. Set to skip VID:PID sysfs scan. |
+| `THERMAL_DEVICE` | (auto-detect) | Camera device path inside the container. Set to skip VID:PID sysfs scan. |
+| `THERMAL_DEVICE_HOST` | (from udev symlink) | Real device path on the host, set by `start.sh`. Override if needed. |
 | `SAVE_DIR` | Script directory | Where snapshots and recordings are written. |
 | `THERMAL_PORT` | 7700 | Port to listen on. Overridden by `--port` flag if both are set. |
-
-These apply to both bare-metal and container deployments.
 
 ---
 
@@ -150,7 +179,8 @@ The capture thread validates every frame:
 3. Temperature values must fall within -50C to 200C.
 
 After 8 consecutive bad frames the camera container is closed and reopened.
-Physically replugging the camera is not required.
+Physically replugging the camera is not required for software-level stream loss,
+but is required if the USB device itself enters a bad state (visible in `dmesg`).
 
 ---
 
